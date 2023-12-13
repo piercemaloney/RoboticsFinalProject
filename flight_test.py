@@ -37,7 +37,7 @@ def perform_k_means_clustering(coords, k):
 
 
 # Note: This does not account for drone's position in space
-def which_way(frame_width, centers, sizes):
+def which_way_k_means(frame_width, centers, sizes):
     # Step 1: Divide the field of view
     section_width = frame_width / 3
 
@@ -56,6 +56,19 @@ def which_way(frame_width, centers, sizes):
 
     # Step 4: Choose direction
     return min(densities, key=densities.get)
+
+
+def which_way(left_fov, middle_fov, right_fov):
+    left_pixels = np.count_nonzero(left_fov)
+    middle_pixels = np.count_nonzero(middle_fov)
+    right_pixels = np.count_nonzero(right_fov)
+
+    if left_pixels < middle_pixels and left_pixels < right_pixels:
+        return 'left'
+    elif right_pixels < middle_pixels and right_pixels < left_pixels:
+        return 'right'
+    else:
+        return 'forward'
 
 
 # ---------------------------------------------
@@ -246,11 +259,6 @@ should_hover = False
 uri = f'radio://0/{group_number}/2M'
 
 def main():
-    # Create hover thread
-    hover_thread = threading.Thread(target=send_hover_command, args=(cf,))
-    hover_thread.daemon = True
-    hover_thread.start()
-
     # Initialize all the CrazyFlie drivers:
     cflib.crtp.init_drivers(enable_debug_driver=False)
 
@@ -273,6 +281,13 @@ def main():
             # Get the Crazyflie class instance:
             cf = scf.cf
             current_y = 0.0
+
+            time.sleep(0.2)
+            # Create hover thread
+            hover_thread = threading.Thread(target=send_hover_command, args=(cf,))
+            hover_thread.daemon = True
+            hover_thread.start()
+            time.sleep(0.2)
 
             # Initialize and ascend:
             t = time.time()
@@ -333,20 +348,13 @@ def main():
                             mask = cv2.bitwise_or(mask1, mask2)
                             mask = mask[frame.shape[0]//2-100:frame.shape[0]//2+0,:] # crop to 200 tall from center
 
-                            # count number of 1s in mask
-                            num_red_pixels = np.count_nonzero(mask)
+                            # Divide the FOV into three parts: left, middle, right
+                            fov_third = mask.shape[1] // 3
+                            left_fov = mask[:, :fov_third]
+                            middle_fov = mask[:, fov_third:2*fov_third]
+                            right_fov = mask[:, 2*fov_third:]
 
-                            # Create a list of tuples that are the height, width of each 1 in the mask
-                            # print('starting')
-                            # NOTE: this swaps the j, i coordinates (bc frame is height x width) so we get proper x, y. But note, y is still inverted.
-                            ones_coords = [[j, i] for i in range(mask.shape[0]) for j in range(mask.shape[1]) if mask[i][j] == 255]
-                            if len(ones_coords) == 0:
-                                continue
-                            
-                            # Plot the k means cluster center as a big red point
-                            centers, sizes = perform_k_means_clustering(ones_coords, k=4)
-
-                            direction = which_way(mask.shape[1], centers, sizes)
+                            direction = which_way(left_fov, middle_fov, right_fov)
 
                             # Switch to scanning mode
                             state = MOVING
